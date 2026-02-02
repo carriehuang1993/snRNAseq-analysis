@@ -1,0 +1,29 @@
+#this is to clean up the namenclature generated from lipidomic analysis
+
+library(dplyr)
+library(stringr)
+
+#KR-211-word process
+
+w <- read.csv("fly-lipid-word-processing.csv", stringsAsFactors = FALSE)
+
+# helper used on the substring inside (...)
+clean_inside <- function(s) {
+  s <- str_remove_all(s, "\\+Ox|\\+5O|\\+4O|\\+3O|\\+2O|\\+OO|\\+O|COOCH3|COOH|CHO")
+  s <- str_remove_all(s, "(?<=[0-9])(?:e|t)(?=_|\\)|$)")   # drop 'e' or 't' suffixes
+  s <- str_remove_all(s, "\\+[0-9]O")                       # generic +nO
+  s <- str_replace_all(s, "_+", "_")
+  s <- str_replace_all(s, "^_|_$", "")
+  s
+}
+
+clean_lipid <- function(x) {
+  # remove adducts after the closing ')', e.g. +NH4, +HCOO, -H
+  x1 <- sub("(\\))[\\+\\-].*$", "\\1", x, perl = TRUE)
+  # clean the content inside the parentheses using a function replacement
+  str_replace_all(x1, "(?<=\\()(.*?)(?=\\))", ~ clean_inside(.x))
+}
+
+w <- w %>% mutate(LipidIon_clean = clean_lipid(LipidIon))
+
+write.csv(w, 'fly_processed_lipid.csv')
