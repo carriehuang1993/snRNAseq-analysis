@@ -1,0 +1,98 @@
+library(tidyverse)
+library(poibin)
+library(sgof)
+library(DescTools)
+
+test_G_12 = function(df){
+  t_result = t.test(df$value[df$group == 1], 
+                    df$value[df$group == 2])
+  return(t_result$p.value)
+}
+
+
+
+
+#######################################
+
+all_data <- read.csv("R_yhn hemolymph_nor to vol&reads_for R.csv")
+
+all_data %>% 
+  select(-c(LipidGroup, FattyAcid, CalcMz, IonFormula)) %>% 
+  filter(!is.na(FA1)) %>% filter(str_detect(FA1, ':')) %>% 
+  separate(FA1, into = c('FA1_before', 'FA1_after'), sep = ':') %>% 
+  separate(FA2, into = c('FA2_before', 'FA2_after'), sep = ':') %>%
+  separate(FA3, into = c('FA3_before', 'FA3_after'), sep = ':') %>%
+  separate(FA4, into = c('FA4_before', 'FA4_after'), sep = ':') %>% 
+  filter(!is.na(FA1_before)) %>% 
+  mutate(FA1_before = as.numeric(str_extract(FA1_before, '\\d+'))) %>% 
+  mutate(FA2_before = as.numeric(str_extract(FA2_before, '\\d+'))) %>%
+  mutate(FA3_before = as.numeric(str_extract(FA3_before, '\\d+'))) %>%
+  mutate(FA4_before = as.numeric(str_extract(FA4_before, '\\d+'))) %>%
+  mutate(FA1_after = as.numeric(str_extract(FA1_after, '\\d+'))) %>%
+  mutate(FA2_after = as.numeric(str_extract(FA2_after, '\\d+'))) %>%
+  mutate(FA3_after = as.numeric(str_extract(FA3_after, '\\d+'))) %>%
+  mutate(FA4_after = as.numeric(str_extract(FA4_after, '\\d+'))) %>%
+  mutate(max_before = pmax(FA1_before, FA2_before, FA3_before, FA4_before, na.rm = T), 
+         max_after = pmax(FA1_after, FA2_after, FA3_after, FA4_after, na.rm = T)) %>% 
+  select(!contains('FA')) -> data_prep
+
+data_prep %>% rename(max_length = max_before, double_bond = max_after) %>% 
+  write.csv('R_yhn hemolymph_nor to vol&reads_doublebond.csv')
+
+
+data_prep %>% select(-c(Class, max_after)) %>% 
+  filter(max_before %% 2 == 0) %>% 
+  mutate(carbon_group = case_when(max_before <= 16 ~ '<=16', 
+                                  max_before > 16 ~ '>16', 
+                                  TRUE ~ as.character(max_before)
+                                  )) %>% 
+  select(-max_before) %>% 
+  group_by(carbon_group) %>% summarise_all(sum) %>% 
+  pivot_longer(-c('carbon_group')) %>%
+  mutate(name = as.numeric(str_extract(name, '\\d+'))) %>% 
+  mutate(group = case_when(between(name, 312, 309) ~ 1, 
+                           between(name, 316, 313) ~ 2)) %>% 
+  group_by(carbon_group) %>% 
+  nest() -> data_analyze_before
+
+data_analyze_before %>% 
+  transmute(p_value = map_dbl(data, test_G_12)) %>% 
+  arrange(p_value) %>% 
+  bind_cols(., adjust_pvalue_BH = p.adjust(.$p_value, method = 'BH'), 
+            adjust_pvalue_BY = p.adjust(.$p_value, method = 'BY')) -> result_before 
+
+data_analyze_before %>% unnest(cols = c(data)) %>%  
+  pivot_wider(names_from = c(group, name), values_from = value) %>% 
+  left_join(result_before) %>% 
+  arrange(p_value) -> length_result
+
+write.csv(length_result, 'TM2334_HNFhemolymph and MT20_length_result.csv')
+
+data_prep %>%  
+  filter(max_before %% 2 == 0) %>% 
+  select(-c(Class, max_before)) %>%
+  mutate(carbon_group = case_when(max_after == 0 ~ '0', 
+                                  max_after == 1 ~ '1', 
+                                  TRUE ~ '>=2'
+  )) %>% 
+  select(-max_after) %>% 
+  group_by(carbon_group) %>% summarise_all(sum) %>%
+  pivot_longer(-c('carbon_group')) %>%
+  mutate(name = as.numeric(str_extract(name, '\\d+'))) %>% 
+  mutate(group = case_when(between(name, 312, 309) ~ 1, 
+                           between(name, 316, 313) ~ 2)) %>% 
+  group_by(carbon_group) %>% 
+  nest() -> data_analyze_after
+
+data_analyze_after %>% 
+  transmute(p_value = map_dbl(data, test_G_12)) %>% 
+  arrange(p_value) %>% 
+  bind_cols(., adjust_pvalue_BH = p.adjust(.$p_value, method = 'BH'), 
+            adjust_pvalue_BY = p.adjust(.$p_value, method = 'BY')) -> result_after 
+
+data_analyze_after %>% unnest(cols = c(data)) %>%  
+  pivot_wider(names_from = c(group, name), values_from = value) %>% 
+  left_join(result_after) %>% 
+  arrange(p_value) -> doublebond_result
+
+write.csv(doublebond_result, 'TM2326_wholebody_YTS_Yhn_doublebond_result.csv')
